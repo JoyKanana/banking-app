@@ -1,0 +1,12 @@
+const currencyFormatter = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  maximumFractionDigits: 0,
+})
+
+/**
+ * Format a whole-dollar amount for display, e.g. 1899 -> "$1,899".
+ */
+export function formatCurrency(value: number): string {
+  return currencyFormatter.format(value)
+}
