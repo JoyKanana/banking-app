@@ -1,69 +1,109 @@
-import Image from "next/image";
+
+const navigation = [
+  "Overview",
+  "Wallet",
+  "Payments",
+  "Messages",
+  "Wishlist",
+  "Creator Studio",
+  "Business",
+];
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <main className="min-h-screen bg-slate-950 text-white">
+      <aside className="fixed left-0 top-0 hidden h-screen w-64 border-r border-white/10 bg-slate-900 p-6 md:block">
+        <h1 className="text-2xl font-bold tracking-wide">
+          RELAY<span className="text-teal-400">.</span>
+        </h1>
+
+        <p className="mt-2 text-xs text-slate-400">
+          YOUR WORLD, CONNECTED.
+        </p>
+
+        <nav className="mt-12 space-y-2">
+          {navigation.map((item) => (
+            <button
+              key={item}
+              className={`w-full rounded-xl px-4 py-3 text-left text-sm transition ${item === "Overview"
+                  ? "bg-teal-400/10 font-semibold text-teal-300"
+                  : "text-slate-400 hover:bg-white/5 hover:text-white"
+                }`}
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+              {item}
+            </button>
+          ))}
+        </nav>
+
+        <div className="absolute bottom-8 left-6 text-sm text-slate-500">
+          Project Relay · Early preview
+        </div>
+      </aside>
+
+      <section className="p-6 md:ml-64 md:p-10">
+        <header className="flex items-center justify-between">
+          <div>
+            <p className="text-sm text-slate-400">Monday, November 9, 2026</p>
+            <h2 className="mt-2 text-2xl font-semibold">
+              Welcome to Relay.
+            </h2>
+          </div>
+
+          <div className="rounded-full border border-white/10 px-4 py-2 text-sm text-slate-300">
+            Demo account
+          </div>
+        </header>
+
+        <div className="mt-10">
+          <p className="text-sm text-slate-400">Your workspace</p>
+          <h3 className="mt-1 text-3xl font-bold">
+            Everything in one place.
+          </h3>
+          <p className="mt-3 max-w-xl text-slate-400">
+            Manage your money, connect with people, organise your goals
+            and grow your business through Project Relay.
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        <div className="mt-10 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="rounded-2xl border border-white/10 bg-slate-900 p-6">
+            <p className="text-sm text-slate-400">Wallet</p>
+            <h4 className="mt-4 text-xl font-semibold">Your money, your way.</h4>
+            <p className="mt-2 text-sm text-slate-500">
+              Multi-currency wallet experience.
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-slate-900 p-6">
+            <p className="text-sm text-slate-400">Connections</p>
+            <h4 className="mt-4 text-xl font-semibold">Stay connected.</h4>
+            <p className="mt-2 text-sm text-slate-500">
+              Private conversations and family support.
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-slate-900 p-6">
+            <p className="text-sm text-slate-400">Creator Studio</p>
+            <h4 className="mt-4 text-xl font-semibold">Build your income.</h4>
+            <p className="mt-2 text-sm text-slate-500">
+              Tools for creators and independent businesses.
+            </p>
+          </div>
         </div>
-      </main>
-    </div>
+
+        <div className="mt-8 rounded-2xl border border-teal-400/20 bg-teal-400/5 p-6">
+          <p className="text-sm font-medium text-teal-300">
+            PROJECT RELAY
+          </p>
+          <h4 className="mt-2 text-xl font-semibold">
+            A connected digital ecosystem.
+          </h4>
+          <p className="mt-2 text-sm text-slate-400">
+            This is our first development screen. Wallet balances,
+            payments and other services are not connected yet.
+          </p>
+        </div>
+      </section>
+    </main>
   );
 }
