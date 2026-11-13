@@ -1,5 +1,17 @@
 import { createContext, useContext, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
+import { usePersistentState } from '@/hooks/usePersistentState'
+import {
+  getCreatorWalletSummary,
+  getMonthlyPoints,
+} from '@/domain/money/selectors'
+import type {
+  MoneyTransaction,
+  PaymentLink as MoneyPaymentLink,
+  PaymentRailId,
+} from '@/domain/money/types'
+import { useAccount } from '@/domain/account/store'
+import { useMoney } from '@/domain/money/store'
 import {
   contributionGoal as initialContributionGoal,
   creatorProfile as initialProfile,
@@ -8,16 +20,9 @@ import {
   initialCustomers,
   initialExpenses,
   initialInvoices,
-  initialNotifications,
-  initialPaymentLinks,
-  initialPayouts,
   initialSubscribers,
   initialTips,
-  initialTransactions,
-  monthlyRevenue,
-  payoutDestinations,
   subscriptionPlans,
-  walletSummary as initialWalletSummary,
 } from '../data/creatorStudio'
 import { answerFinancialQuery } from '../lib/assistant'
 import { createId } from '../lib/format'
@@ -30,15 +35,21 @@ import type {
   CreatorProfile,
   Customer,
   Expense,
+  IncomeSource,
   Invoice,
   InvoiceStatus,
+  MethodBreakdown,
   NewCampaignInput,
   NewExpenseInput,
   NewInvoiceInput,
   NewPaymentLinkInput,
   PaymentLink,
+  PaymentMethod,
   Payout,
+  PayoutDestination,
   PayoutRequestInput,
+  PayoutStatus,
+  SourceBreakdown,
   Tip,
   Transaction,
   WalletSummary,
@@ -58,37 +69,275 @@ const initialMessages: AssistantMessage[] = [
   },
 ]
 
+const railMethods: Record<PaymentRailId, PaymentMethod> = {
+  relay: 'wallet',
+  mpesa: 'mpesa',
+  bank: 'bank-transfer',
+  card: 'card',
+  swift: 'bank-transfer',
+  wise: 'bank-transfer',
+  paypal: 'paypal',
+  usdc: 'crypto',
+  qr: 'wallet',
+  bill: 'wallet',
+}
+
 function weekdayDate(offsetDays = 0): string {
   const date = new Date('2026-11-09T12:00:00')
   date.setDate(date.getDate() + offsetDays)
   return date.toISOString().slice(0, 10)
 }
 
+function metadataString(
+  transaction: MoneyTransaction,
+  key: string,
+): string | undefined {
+  const value = transaction.metadata?.[key]
+  return typeof value === 'string' ? value : undefined
+}
+
+function toCreatorTransaction(transaction: MoneyTransaction): Transaction {
+  const status: Transaction['status'] =
+    transaction.kind === 'refund' || transaction.status === 'reversed'
+      ? 'refunded'
+      : transaction.status === 'failed'
+        ? 'failed'
+        : transaction.status === 'pending' ||
+            transaction.status === 'processing'
+          ? 'pending'
+          : 'paid'
+  const source = (metadataString(transaction, 'source') ?? 'other') as IncomeSource
+  const method = (metadataString(transaction, 'method') ??
+    railMethods[transaction.rail]) as PaymentMethod
+
+  return {
+    id: transaction.id,
+    date: transaction.createdAt.slice(0, 10),
+    description: transaction.description,
+    customerId: metadataString(transaction, 'customerId'),
+    customerName:
+      metadataString(transaction, 'customerName') ?? transaction.counterparty,
+    source,
+    method,
+    gross: transaction.amount,
+    fee: transaction.fee,
+    net: transaction.net,
+    status,
+    reference: transaction.reference,
+  }
+}
+
+function toCreatorPaymentLink(link: MoneyPaymentLink): PaymentLink {
+  return {
+    id: link.id,
+    title: link.title,
+    slug: link.slug,
+    type: link.type,
+    amount: link.amount,
+    source: link.source as IncomeSource,
+    description: link.description,
+    status: link.status,
+    payments: link.payments,
+    revenue: link.revenue,
+    createdAt: link.createdAt,
+    expiresAt: link.expiresAt,
+    limit: link.limit,
+  }
+}
+
+function toCreatorPayout(transaction: MoneyTransaction): Payout {
+  const status: PayoutStatus =
+    transaction.status === 'posted'
+      ? 'paid'
+      : transaction.status === 'failed'
+        ? 'failed'
+        : transaction.status === 'pending'
+          ? 'scheduled'
+          : 'processing'
+
+  return {
+    id: transaction.id,
+    amount: transaction.amount,
+    fee: transaction.fee,
+    net: transaction.net,
+    destinationId:
+      metadataString(transaction, 'destinationId') ?? 'dest-unknown',
+    destinationLabel:
+      metadataString(transaction, 'destinationLabel') ??
+      transaction.counterparty,
+    status,
+    requestedAt: transaction.createdAt.slice(0, 10),
+    completedAt: transaction.postedAt?.slice(0, 10),
+    reference: transaction.reference,
+  }
+}
+
 export function useCreatorStudioState() {
-  const [profile, setProfile] = useState<CreatorProfile>(initialProfile)
-  const [wallet, setWallet] = useState<WalletSummary>(initialWalletSummary)
-  const [transactions, setTransactions] =
-    useState<Transaction[]>(initialTransactions)
-  const [paymentLinks, setPaymentLinks] =
-    useState<PaymentLink[]>(initialPaymentLinks)
-  const [invoices, setInvoices] = useState<Invoice[]>(initialInvoices)
-  const [customers, setCustomers] = useState<Customer[]>(initialCustomers)
-  const [campaigns, setCampaigns] = useState<Campaign[]>(initialCampaigns)
-  const [payouts, setPayouts] = useState<Payout[]>(initialPayouts)
-  const [expenses, setExpenses] = useState<Expense[]>(initialExpenses)
-  const [automations, setAutomations] =
-    useState<Automation[]>(initialAutomations)
-  const [notifications, setNotifications] =
-    useState<CreatorNotification[]>(initialNotifications)
-  const [tips, setTips] = useState<Tip[]>(initialTips)
-  const [goal, setGoal] = useState<ContributionGoal>(initialContributionGoal)
-  const [assistantMessages, setAssistantMessages] =
-    useState<AssistantMessage[]>(initialMessages)
+  const money = useMoney()
+  const account = useAccount()
+  const [profile, setProfile] = usePersistentState<CreatorProfile>(
+    'relay.creator.v1.profile',
+    initialProfile,
+  )
+  const [invoices, setInvoices] = usePersistentState<Invoice[]>(
+    'relay.creator.v1.invoices',
+    initialInvoices,
+  )
+  const [customers, setCustomers] = usePersistentState<Customer[]>(
+    'relay.creator.v1.customers',
+    initialCustomers,
+  )
+  const [campaigns, setCampaigns] = usePersistentState<Campaign[]>(
+    'relay.creator.v1.campaigns',
+    initialCampaigns,
+  )
+  const [expenses, setExpenses] = usePersistentState<Expense[]>(
+    'relay.creator.v1.expenses',
+    initialExpenses,
+  )
+  const [automations, setAutomations] = usePersistentState<Automation[]>(
+    'relay.creator.v1.automations',
+    initialAutomations,
+  )
+  const [tips, setTips] = usePersistentState<Tip[]>(
+    'relay.creator.v1.tips',
+    initialTips,
+  )
+  const [goal, setGoal] = usePersistentState<ContributionGoal>(
+    'relay.creator.v1.goal',
+    initialContributionGoal,
+  )
+  const [assistantMessages, setAssistantMessages] = usePersistentState<
+    AssistantMessage[]
+  >('relay.creator.v1.assistant-messages', initialMessages)
   const [toast, setToast] = useState<ToastMessage | null>(null)
-  const [invoiceCounter, setInvoiceCounter] = useState(47)
+  const [invoiceCounter, setInvoiceCounter] = usePersistentState(
+    'relay.creator.v1.invoice-counter',
+    47,
+  )
   const [subscribers] = useState(initialSubscribers)
 
   const plans = subscriptionPlans
+
+  const wallet: WalletSummary = useMemo(
+    () => getCreatorWalletSummary(money.transactions, money.entries),
+    [money.transactions, money.entries],
+  )
+
+  const transactions = useMemo(
+    () =>
+      money.transactions
+        .filter(
+          (transaction) =>
+            (transaction.kind === 'creator_earning' ||
+              transaction.kind === 'refund') &&
+            (transaction.toSubaccountId === 'sub-creator' ||
+              transaction.fromSubaccountId === 'sub-creator'),
+        )
+        .map(toCreatorTransaction)
+        .sort((a, b) => b.date.localeCompare(a.date)),
+    [money.transactions],
+  )
+
+  const paymentLinks = useMemo(
+    () => money.paymentLinks.map(toCreatorPaymentLink),
+    [money.paymentLinks],
+  )
+
+  const payouts = useMemo(
+    () =>
+      money.transactions
+        .filter(
+          (transaction) =>
+            transaction.kind === 'withdrawal' &&
+            transaction.fromSubaccountId === 'sub-creator',
+        )
+        .map(toCreatorPayout)
+        .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt)),
+    [money.transactions],
+  )
+
+  const destinations: PayoutDestination[] = useMemo(
+    () =>
+      money.destinations.map((destination) => ({
+        id: destination.id,
+        label: destination.label,
+        type: destination.type,
+        detail: destination.detail,
+        primary: destination.primary,
+        verified: destination.verified,
+      })),
+    [money.destinations],
+  )
+
+  const notifications: CreatorNotification[] = useMemo(
+    () =>
+      account.notifications
+        .filter((notification) =>
+          ['creator', 'money', 'payments'].includes(notification.category),
+        )
+        .map((notification) => ({
+          id: notification.id,
+          title: notification.title,
+          body: notification.body,
+          tone:
+            notification.tone === 'danger'
+              ? 'warning'
+              : notification.tone === 'success'
+                ? 'success'
+                : notification.tone === 'warning'
+                  ? 'warning'
+                  : 'info',
+          date: notification.date,
+          read: notification.read,
+        })),
+    [account.notifications],
+  )
+
+  const unreadNotifications = notifications.filter(
+    (notification) => !notification.read,
+  ).length
+
+  const monthlyRevenue = useMemo(
+    () =>
+      getMonthlyPoints(money.transactions, {
+        subaccountId: 'sub-creator',
+        kind: 'creator_earning',
+      }),
+    [money.transactions],
+  )
+
+  const sourceBreakdown: SourceBreakdown[] = useMemo(() => {
+    const totals = new Map<IncomeSource, number>()
+
+    for (const transaction of transactions) {
+      if (transaction.status !== 'paid') continue
+      totals.set(
+        transaction.source,
+        (totals.get(transaction.source) ?? 0) + transaction.net,
+      )
+    }
+
+    return [...totals.entries()]
+      .map(([source, amount]) => ({ source, amount }))
+      .sort((a, b) => b.amount - a.amount)
+  }, [transactions])
+
+  const methodBreakdown: MethodBreakdown[] = useMemo(() => {
+    const totals = new Map<PaymentMethod, number>()
+
+    for (const transaction of transactions) {
+      if (transaction.status !== 'paid') continue
+      totals.set(
+        transaction.method,
+        (totals.get(transaction.method) ?? 0) + transaction.net,
+      )
+    }
+
+    return [...totals.entries()]
+      .map(([method, amount]) => ({ method, amount }))
+      .sort((a, b) => b.amount - a.amount)
+  }, [transactions])
 
   function showToast(message: string, tone: ToastMessage['tone'] = 'success') {
     const nextToast = { id: createId('toast'), message, tone }
@@ -107,29 +356,17 @@ export function useCreatorStudioState() {
   }
 
   function addPaymentLink(input: NewPaymentLinkInput): PaymentLink {
-    const baseSlug = input.title
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '')
-
-    const link: PaymentLink = {
-      id: createId('pl'),
+    const link = money.createPaymentLink({
       title: input.title,
-      slug: baseSlug || `link-${Date.now()}`,
-      type: input.amount ? 'fixed' : 'variable',
-      amount: input.amount ?? undefined,
+      amount: input.amount,
+      currency: 'KES',
       source: input.source,
       description: input.description,
-      status: 'active',
-      payments: 0,
-      revenue: 0,
-      createdAt: weekdayDate(),
-      expiresAt: input.expiresAt || undefined,
-    }
+      expiresAt: input.expiresAt,
+    })
 
-    setPaymentLinks((current) => [link, ...current])
     showToast(`Payment link “${link.title}” is live.`)
-    return link
+    return toCreatorPaymentLink(link)
   }
 
   function createInvoice(input: NewInvoiceInput): Invoice {
@@ -172,20 +409,26 @@ export function useCreatorStudioState() {
     if (!invoice || invoice.status === 'paid') return
 
     const fee = Math.round(invoice.total * 0.029 + 30)
-    const net = invoice.total - fee
-    const transaction: Transaction = {
-      id: createId('tx'),
-      date: weekdayDate(),
-      description: `Invoice payment — ${invoice.description}`,
-      customerId: invoice.customerId,
-      customerName: invoice.customerName,
-      source: 'services',
-      method: 'bank-transfer',
+    const result = money.receiveCreatorEarning({
       gross: invoice.total,
       fee,
-      net,
-      status: 'paid',
+      currency: 'KES',
+      description: `Invoice payment — ${invoice.description}`,
+      counterparty: invoice.customerName,
       reference: invoice.number,
+      date: weekdayDate(),
+      status: 'paid',
+      metadata: {
+        source: 'services',
+        method: 'bank-transfer',
+        customerId: invoice.customerId,
+        customerName: invoice.customerName,
+      },
+    })
+
+    if (!result.ok) {
+      showToast(result.message, 'warning')
+      return
     }
 
     setInvoices((current) =>
@@ -195,15 +438,7 @@ export function useCreatorStudioState() {
           : item,
       ),
     )
-    setTransactions((current) => [transaction, ...current])
-    setWallet((current) => ({
-      ...current,
-      available: current.available + net,
-      totalEarnings: current.totalEarnings + net,
-      totalReceived: current.totalReceived + invoice.total,
-      processingFees: current.processingFees + fee,
-    }))
-    showToast(`${invoice.number} marked paid — ${net} net added to your ledger.`)
+    showToast(`${invoice.number} marked paid — ${invoice.total - fee} net added to your ledger.`)
   }
 
   function updateInvoiceStatus(invoiceId: string, status: InvoiceStatus) {
@@ -221,41 +456,36 @@ export function useCreatorStudioState() {
   }
 
   function requestPayout(input: PayoutRequestInput): boolean {
-    const destination = payoutDestinations.find(
-      (item) => item.id === input.destinationId,
-    )
+    const result = money.withdraw({
+      subaccountId: 'sub-creator',
+      amount: input.amount,
+      destinationId: input.destinationId,
+    })
 
-    if (!destination || input.amount <= 0 || input.amount > wallet.available) {
-      showToast('Choose an amount within your available balance.', 'warning')
+    if (!result.ok) {
+      showToast(result.message, 'warning')
       return false
     }
 
-    const fee = Math.max(30, Math.round(input.amount * 0.0075))
-    const payout: Payout = {
-      id: createId('pay'),
-      amount: input.amount,
-      fee,
-      net: input.amount - fee,
-      destinationId: destination.id,
-      destinationLabel: destination.label,
-      status: 'processing',
-      requestedAt: weekdayDate(),
-      reference: `PO-${Date.now().toString().slice(-6)}`,
-    }
-
-    setPayouts((current) => [payout, ...current])
-    setWallet((current) => ({
-      ...current,
-      available: current.available - input.amount,
-      totalWithdrawals: current.totalWithdrawals + input.amount,
-    }))
-    showToast(
-      `Payout of ${input.amount.toLocaleString()} requested to ${destination.label}.`,
-    )
+    showToast(result.message)
     return true
   }
 
-  function addExpense(input: NewExpenseInput): Expense {
+  function addExpense(input: NewExpenseInput): Expense | null {
+    const result = money.recordExpense({
+      subaccountId: 'sub-creator',
+      description: input.description,
+      amount: input.amount,
+      currency: 'KES',
+      category: input.category,
+      date: input.date,
+    })
+
+    if (!result.ok) {
+      showToast(result.message, 'warning')
+      return null
+    }
+
     const expense: Expense = {
       ...input,
       id: createId('exp'),
@@ -263,7 +493,7 @@ export function useCreatorStudioState() {
     }
 
     setExpenses((current) => [expense, ...current])
-    showToast('Expense recorded. Upload the receipt when it is ready.', 'info')
+    showToast('Expense recorded in the shared ledger.', 'info')
     return expense
   }
 
@@ -291,7 +521,27 @@ export function useCreatorStudioState() {
     if (amount <= 0) return
 
     const fee = Math.round(amount * 0.029 + 30)
-    const net = amount - fee
+    const result = money.receiveCreatorEarning({
+      gross: amount,
+      fee,
+      currency: 'KES',
+      description: 'Campaign contribution — studio fund',
+      counterparty: 'Demo supporter',
+      reference: `CAMP-${Date.now().toString().slice(-5)}`,
+      date: weekdayDate(),
+      status: 'paid',
+      metadata: {
+        source: 'crowdfunding',
+        method: 'wallet',
+        customerName: 'Demo supporter',
+      },
+    })
+
+    if (!result.ok) {
+      showToast(result.message, 'warning')
+      return
+    }
+
     const tip: Tip = {
       id: createId('tip'),
       supporterName: 'Demo supporter',
@@ -309,30 +559,7 @@ export function useCreatorStudioState() {
       raised: current.raised + amount,
       contributors: current.contributors + 1,
     }))
-    setTransactions((current) => [
-      {
-        id: createId('tx'),
-        date: weekdayDate(),
-        description: 'Campaign contribution — studio fund',
-        customerName: 'Demo supporter',
-        source: 'crowdfunding',
-        method: 'wallet',
-        gross: amount,
-        fee,
-        net,
-        status: 'paid',
-        reference: `CAMP-${Date.now().toString().slice(-5)}`,
-      },
-      ...current,
-    ])
-    setWallet((current) => ({
-      ...current,
-      available: current.available + net,
-      totalEarnings: current.totalEarnings + net,
-      totalReceived: current.totalReceived + amount,
-      processingFees: current.processingFees + fee,
-    }))
-    showToast('Contribution recorded and added to your ledger.')
+    showToast('Contribution recorded and added to the shared ledger.')
   }
 
   function toggleAutomation(automationId: string) {
@@ -354,9 +581,7 @@ export function useCreatorStudioState() {
   }
 
   function markNotificationsRead() {
-    setNotifications((current) =>
-      current.map((notification) => ({ ...notification, read: true })),
-    )
+    account.markAllNotificationsRead()
   }
 
   function askAssistant(query: string) {
@@ -389,10 +614,6 @@ export function useCreatorStudioState() {
     ])
   }
 
-  const unreadNotifications = notifications.filter(
-    (notification) => !notification.read,
-  ).length
-
   return useMemo(
     () => ({
       profile,
@@ -403,7 +624,7 @@ export function useCreatorStudioState() {
       customers,
       campaigns,
       payouts,
-      destinations: payoutDestinations,
+      destinations,
       expenses,
       automations,
       notifications,
@@ -415,6 +636,8 @@ export function useCreatorStudioState() {
       assistantMessages,
       toast,
       monthlyRevenue,
+      sourceBreakdown,
+      methodBreakdown,
       updateProfile,
       addPaymentLink,
       createInvoice,
@@ -441,6 +664,7 @@ export function useCreatorStudioState() {
       customers,
       campaigns,
       payouts,
+      destinations,
       expenses,
       automations,
       notifications,
@@ -450,6 +674,9 @@ export function useCreatorStudioState() {
       subscribers,
       assistantMessages,
       toast,
+      monthlyRevenue,
+      sourceBreakdown,
+      methodBreakdown,
       invoiceCounter,
     ],
   )

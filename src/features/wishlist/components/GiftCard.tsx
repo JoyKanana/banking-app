@@ -50,7 +50,7 @@ export function GiftCard({ gift, onTogglePin, onTogglePrivacy }: GiftCardProps) 
     const clipboard = navigator.clipboard
     if (!clipboard) return
 
-    const url = `${window.location.origin}/wishlist?gift=${gift.id}`
+    const url = `${window.location.origin}/connections?tab=wishlist&gift=${gift.id}`
 
     clipboard
       .writeText(url)

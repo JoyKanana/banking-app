@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { usePersistentState } from '@/hooks/usePersistentState'
 import { categoryEmoji, initialGifts, initialWishlists } from '../data/wishlists'
 import type {
   Gift,
@@ -50,9 +51,16 @@ function createId(prefix: string): string {
  * the small mutations the page exposes (pin, privacy, add, create list).
  */
 export function useWishlistState() {
-  const [wishlists, setWishlists] = useState<Wishlist[]>(initialWishlists)
-  const [gifts, setGifts] = useState<Gift[]>(initialGifts)
-  const [activeWishlistId, setActiveWishlistId] = useState(
+  const [wishlists, setWishlists] = usePersistentState<Wishlist[]>(
+    'relay.wishlist.v1.lists',
+    initialWishlists,
+  )
+  const [gifts, setGifts] = usePersistentState<Gift[]>(
+    'relay.wishlist.v1.gifts',
+    initialGifts,
+  )
+  const [activeWishlistId, setActiveWishlistId] = usePersistentState(
+    'relay.wishlist.v1.active-list',
     initialWishlists[0].id,
   )
   const [search, setSearch] = useState('')
